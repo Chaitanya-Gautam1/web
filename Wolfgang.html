@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Wolf Runner</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            user-select: none;
+        }
+        #gameContainer {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            touch-action: none;
+        }
+        #gameCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: lightblue;
+        }
+        #controlArea {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 200px;
+            z-index: 10;
+        }
+        #touchCircle {
+            position: absolute;
+            border-radius: 50%;
+            border: 2px solid rgba(0,0,0,0.3);
+            background-color: rgba(255,255,255,0.2);
+            display: none;
+        }
+        #touchIndicator {
+            position: absolute;
+            border-radius: 50%;
+            background-color: rgba(0,0,0,0.5);
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+        <div id="controlArea">
+            <div id="touchCircle"></div>
+            <div id="touchIndicator"></div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const controlArea = document.getElementById('controlArea');
+        const touchCircle = document.getElementById('touchCircle');
+        const touchIndicator = document.getElementById('touchIndicator');
+
+        const wolfAnimation = {
+            frameUrls: [
+                'https://i.ibb.co/h81zpTV/IMG-20241202-232408.png',
+                'https://i.ibb.co/yWvsRNQ/IMG-20241202-232423.png',
+                'https://i.ibb.co/L5L9PxS/IMG-20241203-205037.png',
+                'https://i.ibb.co/zQdb6w0/IMG-20241202-232510.png',
+                'https://i.ibb.co/DVMWwXN/IMG-20241202-232545.png',
+                'https://i.ibb.co/NFcBMJY/IMG-20241202-232621.png',
+                'https://i.ibb.co/jHQSxcv/IMG-20241202-232659.png'
+            ],
+            frames: [],
+            currentFrameIndex: 0,
+            animationSpeed: 5,
+            frameCounter: 0
+        };
+
+        const jumpAnimation = {
+            frameUrls: [
+                'https://i.ibb.co/cww5SYs/IMG-20241203-212629.png',
+                'https://i.ibb.co/TWpQwLC/IMG-20241203-212651.png',
+                'https://i.ibb.co/98t3Qdn/IMG-20241203-212722.png',
+                'https://i.ibb.co/ZcMNFYs/IMG-20241203-212739.png',
+                'https://i.ibb.co/9y566Df/IMG-20241203-212753.png',
+                'https://i.ibb.co/3C75tBd/IMG-20241203-212827.png',
+                'https://i.ibb.co/LRb7rhF/IMG-20241203-212851.png',
+                'https://i.ibb.co/p0pPj68/IMG-20241203-212915.png',
+                'https://i.ibb.co/NrqsC6x/IMG-20241203-212930.png',
+                'https://i.ibb.co/sFsgkyq/IMG-20241203-212945.png',
+                'https://i.ibb.co/mytVCB2/IMG-20241203-213011.png'
+            ],
+            frames: [],
+            currentFrameIndex: 0,
+            animationSpeed: 3,
+            frameCounter: 0,
+            landingFrames: [8, 9, 10]
+        };
+
+        const idleFrameUrl = 'https://i.ibb.co/h81zpTV/IMG-20241202-232408.png';
+        const idleFrame = new Image();
+        idleFrame.src = idleFrameUrl;
+
+        const game = {
+            player: {
+                x: 0,
+                y: 0,
+                width: 100,
+                height: 100,
+                speed: 5,
+                jumpStrength: 10,
+                velocityY: 0,
+                isJumping: false,
+                direction: 1,
+                state: 'idle'
+            },
+            gravity: 0.5,
+            groundLevel: 0
+        };
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            game.player.x = canvas.width / 2;
+            game.groundLevel = canvas.height - 100;
+            game.player.y = game.groundLevel - game.player.height;
+        }
+
+        resizeCanvas();
+
+        function loadFrames(animation) {
+            animation.frames = animation.frameUrls.map((url) => {
+                const img = new Image();
+                img.src = url;
+                return img;
+            });
+        }
+
+        let startX, startY;
+        let isDragging = false;
+        const TOUCH_AREA_RADIUS = 75;
+        const TOUCH_INDICATOR_RADIUS = 25;
+        let LEFT_CONTROL_WIDTH;
+
+        // Update LEFT_CONTROL_WIDTH on resize
+        function updateLeftControlWidth() {
+            LEFT_CONTROL_WIDTH = window.innerWidth / 2;
+        }
+        updateLeftControlWidth();
+        window.addEventListener('resize', updateLeftControlWidth);
+
+        controlArea.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            const touch = e.touches[0];
+            
+            // Ensure the click is on the left side of the screen
+            if (touch.clientX > LEFT_CONTROL_WIDTH) return;
+
+            startX = touch.clientX;
+            startY = touch.clientY;
+            isDragging = true;
+
+            touchCircle.style.display = 'block';
+            touchCircle.style.width = `${TOUCH_AREA_RADIUS * 2}px`;
+            touchCircle.style.height = `${TOUCH_AREA_RADIUS * 2}px`;
+            touchCircle.style.left = `${startX - TOUCH_AREA_RADIUS}px`;
+            touchCircle.style.top = `${startY - TOUCH_AREA_RADIUS}px`;
+
+            touchIndicator.style.display = 'block';
+            touchIndicator.style.width = `${TOUCH_INDICATOR_RADIUS * 2}px`;
+            touchIndicator.style.height = `${TOUCH_INDICATOR_RADIUS * 2}px`;
+            touchIndicator.style.left = `${startX - TOUCH_INDICATOR_RADIUS}px`;
+            touchIndicator.style.top = `${startY - TOUCH_INDICATOR_RADIUS}px`;
+        }, { passive: false });
+
+        controlArea.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if (!isDragging) return;
+            
+            const touch = e.touches[0];
+            
+            // Restrict movement to left side of screen
+            if (touch.clientX > LEFT_CONTROL_WIDTH) {
+                isDragging = false;
+                touchCircle.style.display = 'none';
+                touchIndicator.style.display = 'none';
+                return;
+            }
+
+            const deltaX = touch.clientX - startX;
+            const deltaY = touch.clientY - startY;
+
+            const maxDistance = TOUCH_AREA_RADIUS - TOUCH_INDICATOR_RADIUS;
+            const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+            
+            let indicatorX, indicatorY;
+            if (distance <= maxDistance) {
+                indicatorX = touch.clientX - TOUCH_INDICATOR_RADIUS;
+                indicatorY = touch.clientY - TOUCH_INDICATOR_RADIUS;
+            } else {
+                const angle = Math.atan2(deltaY, deltaX);
+                indicatorX = startX + Math.cos(angle) * maxDistance - TOUCH_INDICATOR_RADIUS;
+                indicatorY = startY + Math.sin(angle) * maxDistance - TOUCH_INDICATOR_RADIUS;
+            }
+
+            touchIndicator.style.left = `${indicatorX}px`;
+            touchIndicator.style.top = `${indicatorY}px`;
+
+            if (Math.abs(deltaY) > Math.abs(deltaX)) {
+                if (deltaY < -50) {
+                    game.player.direction = deltaX < 0 ? -1 : 
+                                             deltaX > 0 ? 1 : game.player.direction;
+                    if (!game.player.isJumping && game.player.y === game.groundLevel - game.player.height) {
+                        game.player.velocityY = -game.player.jumpStrength;
+                        game.player.isJumping = true;
+                        jumpAnimation.currentFrameIndex = 0;
+                    }
+                }
+            } else {
+                if (deltaX < -50) {
+                    game.player.direction = -1;
+                    game.player.state = 'walking';
+                } else if (deltaX > 50) {
+                    game.player.direction = 1;
+                    game.player.state = 'walking';
+                }
+            }
+        }, { passive: false });
+
+        controlArea.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            isDragging = false;
+            game.player.state = 'idle';
+            touchCircle.style.display = 'none';
+            touchIndicator.style.display = 'none';
+        }, { passive: false });
+
+        function updateJumpAnimation() {
+            jumpAnimation.frameCounter++;
+            if (jumpAnimation.frameCounter >= jumpAnimation.animationSpeed) {
+                if (game.player.isJumping) {
+                    if (jumpAnimation.currentFrameIndex < 3 || jumpAnimation.currentFrameIndex > 7) {
+                        jumpAnimation.currentFrameIndex = 3;
+                    } else if (jumpAnimation.currentFrameIndex < 7) {
+                        jumpAnimation.currentFrameIndex++;
+                    } else {
+                        jumpAnimation.currentFrameIndex = 7;
+                    }
+                } else {
+                    if (jumpAnimation.currentFrameIndex < 8) {
+                        jumpAnimation.currentFrameIndex = 8;
+                    } else if (jumpAnimation.currentFrameIndex < 10) {
+                        jumpAnimation.currentFrameIndex++;
+                    } else {
+                        jumpAnimation.currentFrameIndex = 10;
+                    }
+                }
+                jumpAnimation.frameCounter = 0;
+            }
+        }
+
+        function update() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            ctx.fillStyle = 'green';
+            ctx.fillRect(0, game.groundLevel, canvas.width, 50);
+
+            if (game.player.state === 'walking') {
+                game.player.x += game.player.direction * game.player.speed;
+            }
+
+            game.player.y += game.player.velocityY;
+            game.player.velocityY += game.gravity;
+
+            if (game.player.y >= game.groundLevel - game.player.height) {
+                game.player.y = game.groundLevel - game.player.height;
+                game.player.velocityY = 0;
+                game.player.isJumping = false;
+            }
+
+            game.player.x = Math.max(0, Math.min(game.player.x, canvas.width - game.player.width));
+
+            const currentFrame = game.player.isJumping
+                ? jumpAnimation.frames[jumpAnimation.currentFrameIndex]
+                : game.player.state === 'walking'
+                    ? wolfAnimation.frames[wolfAnimation.currentFrameIndex]
+                    : idleFrame;
+
+            if (currentFrame && currentFrame.complete) {
+                ctx.save();
+                if (game.player.direction === -1) {
+                    ctx.scale(-1, 1);
+                    ctx.drawImage(
+                        currentFrame,
+                        -game.player.x - game.player.width,
+                        game.player.y,
+                        game.player.width,
+                        game.player.height
+                    );
+                } else {
+                    ctx.drawImage(
+                        currentFrame,
+                        game.player.x,
+                        game.player.y,
+                        game.player.width,
+                        game.player.height
+                    );
+                }
+                ctx.restore();
+            }
+
+            if (game.player.isJumping) {
+                updateJumpAnimation();
+            } else {
+                if (game.player.state === 'walking') {
+                    wolfAnimation.frameCounter++;
+                    if (wolfAnimation.frameCounter >= wolfAnimation.animationSpeed) {
+                        wolfAnimation.currentFrameIndex = 
+                            (wolfAnimation.currentFrameIndex + 1) % wolfAnimation.frames.length;
+                        wolfAnimation.frameCounter = 0;
+                    }
+                } else {
+                    wolfAnimation.currentFrameIndex = 0;
+                }
+            }
+
+            requestAnimationFrame(update);
+        }
+
+        window.addEventListener('resize', () => {
+            resizeCanvas();
+            game.groundLevel = canvas.height - 100;
+        });
+
+        loadFrames(wolfAnimation);
+        loadFrames(jumpAnimation);
+        update();
+    </script>
+</body>
+</html>
